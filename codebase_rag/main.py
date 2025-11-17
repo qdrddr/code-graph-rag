@@ -800,6 +800,31 @@ async def main_async(repo_path: str, batch_size: int) -> None:
         await run_chat_loop(rag_agent, [], project_root)
 
 
+async def main_async_single_query(
+    repo_path: str, batch_size: int, question: str
+) -> None:
+    """Initializes services and runs a single query in non-interactive mode."""
+    project_root = _setup_common_initialization(repo_path)
+
+    with MemgraphIngestor(
+        host=settings.MEMGRAPH_HOST,
+        port=settings.MEMGRAPH_PORT,
+        batch_size=batch_size,
+        username=settings.MEMGRAPH_USERNAME,
+        password=settings.MEMGRAPH_PASSWORD,
+    ) as ingestor:
+        rag_agent = _initialize_services_and_agent(repo_path, ingestor)
+
+        # Handle images in the question
+        question_with_context = _handle_chat_images(question, project_root)
+
+        # Run the query
+        response = await rag_agent.run(question_with_context, message_history=[])
+
+        # Output the response to stdout
+        print(response.output)
+
+
 @app.command()
 def start(
     repo_path: str | None = typer.Option(
@@ -841,6 +866,12 @@ def start(
         "--batch-size",
         min=1,
         help="Number of buffered nodes/relationships before flushing to Memgraph",
+    ),
+    question: str | None = typer.Option(
+        None,
+        "-q",
+        "--question",
+        help="Run a single query and exit (non-interactive mode). Output is sent to stdout.",
     ),
 ) -> None:
     """Starts the Codebase RAG CLI."""
@@ -896,7 +927,16 @@ def start(
         return
 
     try:
-        asyncio.run(main_async(target_repo_path, effective_batch_size))
+        if question:
+            # Non-interactive mode: run a single query and exit
+            asyncio.run(
+                main_async_single_query(
+                    target_repo_path, effective_batch_size, question
+                )
+            )
+        else:
+            # Interactive mode: run the chat loop
+            asyncio.run(main_async(target_repo_path, effective_batch_size))
     except KeyboardInterrupt:
         console.print("\n[bold red]Application terminated by user.[/bold red]")
     except ValueError as e:
