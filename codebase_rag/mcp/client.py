@@ -6,6 +6,7 @@ and executes the ask_code_graph tool with a provided question.
 
 import asyncio
 import json
+import os
 import sys
 from typing import Any
 
@@ -25,32 +26,36 @@ async def query_mcp_server(question: str) -> dict[str, Any]:
     Returns:
         Dictionary with the response from the server
     """
-    # Start the MCP server as a subprocess
-    server_params = StdioServerParameters(
-        command="python",
-        args=["-m", "codebase_rag.main", "mcp-server"],
-    )
+    # Start the MCP server as a subprocess with stderr redirected to /dev/null
+    # This suppresses all server logs while keeping stdout/stdin for MCP communication
+    with open(os.devnull, "w") as devnull:
+        server_params = StdioServerParameters(
+            command="python",
+            args=["-m", "codebase_rag.main", "mcp-server"],
+        )
 
-    async with stdio_client(server=server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize the session
-            await session.initialize()
+        async with stdio_client(server=server_params, errlog=devnull) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Initialize the session
+                await session.initialize()
 
-            # Call the ask_code_graph tool
-            result = await session.call_tool("ask_code_graph", {"question": question})
+                # Call the ask_code_graph tool
+                result = await session.call_tool(
+                    "ask_code_graph", {"question": question}
+                )
 
-            # Extract the response text
-            if result.content:
-                response_text = result.content[0].text
-                # Parse JSON response
-                try:
-                    parsed = json.loads(response_text)
-                    if isinstance(parsed, dict):
-                        return parsed
-                    return {"output": str(parsed)}
-                except json.JSONDecodeError:
-                    return {"output": response_text}
-            return {"output": "No response from server"}
+                # Extract the response text
+                if result.content:
+                    response_text = result.content[0].text
+                    # Parse JSON response
+                    try:
+                        parsed = json.loads(response_text)
+                        if isinstance(parsed, dict):
+                            return parsed
+                        return {"output": str(parsed)}
+                    except json.JSONDecodeError:
+                        return {"output": response_text}
+                return {"output": "No response from server"}
 
 
 @app.command()
