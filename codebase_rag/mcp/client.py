@@ -11,7 +11,7 @@ from typing import Any
 
 import typer
 from mcp import ClientSession
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 app = typer.Typer()
 
@@ -25,7 +25,13 @@ async def query_mcp_server(question: str) -> dict[str, Any]:
     Returns:
         Dictionary with the response from the server
     """
-    async with stdio_client() as (read, write):
+    # Start the MCP server as a subprocess
+    server_params = StdioServerParameters(
+        command="python",
+        args=["-m", "codebase_rag.main", "mcp-server"],
+    )
+
+    async with stdio_client(server=server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the session
             await session.initialize()
