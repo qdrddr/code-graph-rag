@@ -4,12 +4,15 @@ This module adapts pydantic-ai Tool instances to MCP-compatible functions.
 """
 
 import itertools
+import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
+from rich.console import Console
 
 from codebase_rag.graph_updater import GraphUpdater
 from codebase_rag.parser_loader import load_parsers
@@ -78,9 +81,12 @@ class MCPToolsRegistry:
         self.shell_commander = ShellCommander(project_root=project_root)
         self.document_analyzer = DocumentAnalyzer(project_root=project_root)
 
+        # Create a console that writes to stderr to avoid corrupting MCP protocol on stdout
+        mcp_console = Console(file=sys.stderr, width=None, force_terminal=True)
+
         # Create pydantic-ai tools - we'll call the underlying functions directly
         self._query_tool = create_query_tool(
-            ingestor=ingestor, cypher_gen=cypher_gen, console=None
+            ingestor=ingestor, cypher_gen=cypher_gen, console=mcp_console
         )
         self._code_tool = create_code_retrieval_tool(code_retriever=self.code_retriever)
         self._file_editor_tool = create_file_editor_tool(file_editor=self.file_editor)
@@ -505,7 +511,7 @@ class MCPToolsRegistry:
         """
         logger.info(f"[MCP] list_directory: {directory_path}")
         try:
-            result = self._directory_lister_tool.function(  # type: ignore[call-arg]
+            result = await self._directory_lister_tool.function(  # type: ignore[call-arg]
                 directory_path=directory_path
             )
             return cast(str, result)
@@ -523,17 +529,45 @@ class MCPToolsRegistry:
             question: The question to ask about the codebase
 
         Returns:
-            Dictionary with 'output' key containing the answer
+            Dictionary with 'output' key containing the answer, properly JSON-serializable
         """
         logger.info(f"[MCP] ask_agent: {question}")
         try:
             # Run the query using the RAG agent
             response = await self.rag_agent.run(question, message_history=[])
 
-            return {"output": response.output}
+            # Extract and ensure output is JSON-serializable
+            output = response.output
+            if isinstance(output, str):
+                output_text = output
+            else:
+                # Convert non-string outputs to string representation
+                output_text = str(output)
+
+            # Verify the response is JSON-serializable before returning
+            result_dict: dict[str, Any] = {"output": output_text}
+
+            # Test JSON serialization to catch any issues early
+            try:
+                json.dumps(result_dict)
+            except (TypeError, ValueError) as json_err:
+                logger.warning(
+                    f"[MCP] Response may not be fully JSON-serializable: {json_err}",
+                    exc_info=False,
+                )
+                # Ensure we return a safe, serializable response
+                result_dict = {"output": str(output_text)}
+
+            logger.info(f"[MCP] ask_agent response length: {len(output_text)} chars")
+            return result_dict
         except Exception as e:
             logger.error(f"[MCP] Error asking code graph: {e}", exc_info=True)
-            return {"output": f"Error: {str(e)}", "error": True}
+            # Return error in consistent format
+            return {
+                "output": f"Error: {str(e)}",
+                "error": True,
+                "error_type": type(e).__name__,
+            }
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
         """Get MCP tool schemas for all registered tools.

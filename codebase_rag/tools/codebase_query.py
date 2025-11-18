@@ -19,10 +19,17 @@ def create_query_tool(
     ingestor: MemgraphIngestor,
     cypher_gen: CypherGenerator,
     console: Console | None = None,
+    max_results: int = 1000,
 ) -> Tool:
     """
     Factory function that creates the knowledge graph query tool,
     injecting its dependencies.
+
+    Args:
+        ingestor: Memgraph ingestor instance
+        cypher_gen: Cypher query generator instance
+        console: Console for output (defaults to stdout)
+        max_results: Maximum number of results to return (default: 50)
     """
     # Use provided console or create a default one
     if console is None:
@@ -49,6 +56,15 @@ def create_query_tool(
             cypher_query = await cypher_gen.generate(natural_language_query)
 
             results = ingestor.fetch_all(cypher_query)
+
+            # Limit results to prevent oversized requests to LLM
+            total_results = len(results)
+            if len(results) > max_results:
+                logger.warning(
+                    f"[Tool:QueryGraph] Query returned {total_results} results, "
+                    f"limiting to {max_results} to prevent oversized requests"
+                )
+                results = results[:max_results]
 
             if results:
                 table = Table(
@@ -82,7 +98,13 @@ def create_query_tool(
                     )
                 )
 
-            summary = f"Successfully retrieved {len(results)} item(s) from the graph."
+            # Build summary with truncation info if applicable
+            if total_results > max_results:
+                summary = f"Retrieved {len(results)} of {total_results} item(s) from the graph (truncated to prevent oversized requests)."
+            else:
+                summary = (
+                    f"Successfully retrieved {len(results)} item(s) from the graph."
+                )
             return GraphData(query_used=cypher_query, results=results, summary=summary)
         except LLMGenerationError as e:
             return GraphData(

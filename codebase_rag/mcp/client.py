@@ -24,7 +24,10 @@ async def query_mcp_server(question: str) -> dict[str, Any]:
         question: The question to ask about the codebase
 
     Returns:
-        Dictionary with the response from the server
+        Dictionary with the response from the server, properly parsed from JSON
+
+    Raises:
+        Exception: If the MCP server fails to initialize or respond
     """
     # Start the MCP server as a subprocess with stderr redirected to /dev/null
     # This suppresses all server logs while keeping stdout/stdin for MCP communication
@@ -42,18 +45,26 @@ async def query_mcp_server(question: str) -> dict[str, Any]:
                 # Call the ask_agent tool
                 result = await session.call_tool("ask_agent", {"question": question})
 
-                # Extract the response text
-                if result.content:
-                    response_text = result.content[0].text
-                    # Parse JSON response
-                    try:
-                        parsed = json.loads(response_text)
-                        if isinstance(parsed, dict):
-                            return parsed
-                        return {"output": str(parsed)}
-                    except json.JSONDecodeError:
-                        return {"output": response_text}
-                return {"output": "No response from server"}
+                # Extract and parse the response
+                if not result.content:
+                    return {"output": "No response from server", "error": True}
+
+                response_text = result.content[0].text
+
+                # Parse JSON response - the server should always return JSON for ask_agent
+                try:
+                    parsed = json.loads(response_text)
+                    if isinstance(parsed, dict):
+                        return parsed
+                    # If parsed is not a dict, wrap it
+                    return {"output": str(parsed)}
+                except json.JSONDecodeError as e:
+                    # If JSON parsing fails, return the raw text
+                    return {
+                        "output": response_text,
+                        "error": True,
+                        "parse_error": str(e),
+                    }
 
 
 @app.command()

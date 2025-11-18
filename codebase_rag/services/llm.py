@@ -88,7 +88,12 @@ class CypherGenerator:
 
 
 def create_rag_orchestrator(tools: list[Tool]) -> Agent:
-    """Factory function to create the main RAG orchestrator agent."""
+    """Factory function to create the main RAG orchestrator agent.
+
+    Creates an Agent with explicit string output type to avoid pydantic-ai
+    output validation issues. The agent will return natural language responses
+    as strings.
+    """
     try:
         # Get active orchestrator model configuration
         config = settings.active_orchestrator_config
@@ -111,6 +116,7 @@ def create_rag_orchestrator(tools: list[Tool]) -> Agent:
             model=llm,
             system_prompt=RAG_ORCHESTRATOR_SYSTEM_PROMPT,
             tools=tools,
+            output_type=str,  # Explicitly set output type to string to avoid validation errors
         )
     except Exception as e:
         raise LLMGenerationError(f"Failed to initialize RAG Orchestrator: {e}") from e

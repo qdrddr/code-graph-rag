@@ -145,8 +145,13 @@ def create_server() -> tuple[Server, MemgraphIngestor]:
 
         Tool handlers are dynamically resolved from the MCPToolsRegistry,
         ensuring consistency with tool definitions.
+
+        Returns:
+            list[TextContent]: MCP-compliant response containing the tool result as JSON text
         """
-        logger.info(f"[GraphCode MCP] Calling tool: {name}")
+        logger.info(
+            f"[GraphCode MCP] Calling tool: {name} with arguments: {list(arguments.keys())}"
+        )
 
         try:
             # Resolve handler from registry
@@ -157,22 +162,57 @@ def create_server() -> tuple[Server, MemgraphIngestor]:
                 return [TextContent(type="text", text=f"Error: {error_msg}")]
 
             handler, returns_json = handler_info
+            logger.debug(
+                f"[GraphCode MCP] Handler resolved for {name}, returns_json={returns_json}"
+            )
 
             # Call handler with unpacked arguments
             result = await handler(**arguments)
+            logger.debug(f"[GraphCode MCP] Handler executed successfully for {name}")
 
             # Format result based on output type
             if returns_json:
-                result_text = json.dumps(result, indent=2)
+                try:
+                    result_text = json.dumps(result, indent=2)
+                    logger.info(
+                        f"[GraphCode MCP] JSON serialized result for {name}: {len(result_text)} bytes"
+                    )
+                except (TypeError, ValueError) as json_err:
+                    logger.error(
+                        f"[GraphCode MCP] Failed to JSON serialize result for tool '{name}': {json_err}",
+                        exc_info=True,
+                    )
+                    # Fallback: convert to string representation with error info
+                    fallback_result = {
+                        "output": str(result),
+                        "serialization_error": str(json_err),
+                        "error_type": "json_serialization_failed",
+                    }
+                    result_text = json.dumps(fallback_result, indent=2)
+                    logger.info(
+                        f"[GraphCode MCP] Using fallback serialization for {name}"
+                    )
             else:
                 result_text = str(result)
+                logger.debug(
+                    f"[GraphCode MCP] String formatted result for {name}: {len(result_text)} bytes"
+                )
 
-            return [TextContent(type="text", text=result_text)]
+            # Return MCP-compliant response
+            response = [TextContent(type="text", text=result_text)]
+            logger.debug(f"[GraphCode MCP] Returning response for {name}")
+            return response
 
         except Exception as e:
             error_msg = f"Error executing tool '{name}': {str(e)}"
             logger.error(f"[GraphCode MCP] {error_msg}", exc_info=True)
-            return [TextContent(type="text", text=f"Error: {error_msg}")]
+            # Return error in consistent format
+            error_response = {
+                "error": error_msg,
+                "error_type": type(e).__name__,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(error_response, indent=2))]
 
     return server, ingestor
 
