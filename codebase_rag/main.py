@@ -794,6 +794,8 @@ async def main_async_single_query(
         host=settings.MEMGRAPH_HOST,
         port=settings.MEMGRAPH_PORT,
         batch_size=batch_size,
+        username=settings.MEMGRAPH_USERNAME,
+        password=settings.MEMGRAPH_PASSWORD,
     ) as ingestor:
         rag_agent = _initialize_services_and_agent(repo_path, ingestor)
 
