@@ -1,7 +1,7 @@
 """MCP client for querying the code graph via the MCP server.
 
 This module provides a simple CLI client that connects to the MCP server
-and executes the ask_code_graph tool with a provided question.
+and executes the ask_agent tool with a provided question.
 """
 
 import asyncio
@@ -39,10 +39,8 @@ async def query_mcp_server(question: str) -> dict[str, Any]:
                 # Initialize the session
                 await session.initialize()
 
-                # Call the ask_code_graph tool
-                result = await session.call_tool(
-                    "ask_code_graph", {"question": question}
-                )
+                # Call the ask_agent tool
+                result = await session.call_tool("ask_agent", {"question": question})
 
                 # Extract the response text
                 if result.content:
@@ -61,13 +59,13 @@ async def query_mcp_server(question: str) -> dict[str, Any]:
 @app.command()
 def main(
     question: str = typer.Option(
-        ..., "--question", "-q", help="Question to ask about the codebase"
+        ..., "--ask-agent", "-a", help="Question to ask about the codebase"
     ),
 ) -> None:
     """Query the code graph via MCP server.
 
     Example:
-        python -m codebase_rag.mcp.client --question "What functions call UserService.create_user?"
+        python -m codebase_rag.mcp.client --ask-agent "What functions call UserService.create_user?"
     """
     try:
         # Run the async query
