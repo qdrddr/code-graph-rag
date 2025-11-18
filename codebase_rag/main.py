@@ -774,6 +774,29 @@ def _initialize_services_and_agent(repo_path: str, ingestor: MemgraphIngestor) -
     return rag_agent
 
 
+async def main_async_single_query(
+    repo_path: str, batch_size: int, question: str
+) -> None:
+    """Initializes services and runs a single query in non-interactive mode."""
+    project_root = _setup_common_initialization(repo_path)
+
+    with MemgraphIngestor(
+        host=settings.MEMGRAPH_HOST,
+        port=settings.MEMGRAPH_PORT,
+        batch_size=batch_size,
+    ) as ingestor:
+        rag_agent = _initialize_services_and_agent(repo_path, ingestor)
+
+        # Handle images in the question
+        question_with_context = _handle_chat_images(question, project_root)
+
+        # Run the query
+        response = await rag_agent.run(question_with_context, message_history=[])
+
+        # Output response to stdout
+        print(response.output)
+
+
 async def main_async(repo_path: str, batch_size: int) -> None:
     """Initializes services and runs the main application loop."""
     project_root = _setup_common_initialization(repo_path)
@@ -798,31 +821,6 @@ async def main_async(repo_path: str, batch_size: int) -> None:
 
         rag_agent = _initialize_services_and_agent(repo_path, ingestor)
         await run_chat_loop(rag_agent, [], project_root)
-
-
-async def main_async_single_query(
-    repo_path: str, batch_size: int, question: str
-) -> None:
-    """Initializes services and runs a single query in non-interactive mode."""
-    project_root = _setup_common_initialization(repo_path)
-
-    with MemgraphIngestor(
-        host=settings.MEMGRAPH_HOST,
-        port=settings.MEMGRAPH_PORT,
-        batch_size=batch_size,
-        username=settings.MEMGRAPH_USERNAME,
-        password=settings.MEMGRAPH_PASSWORD,
-    ) as ingestor:
-        rag_agent = _initialize_services_and_agent(repo_path, ingestor)
-
-        # Handle images in the question
-        question_with_context = _handle_chat_images(question, project_root)
-
-        # Run the query
-        response = await rag_agent.run(question_with_context, message_history=[])
-
-        # Output the response to stdout
-        print(response.output)
 
 
 @app.command()
