@@ -6,7 +6,6 @@ capabilities via the Model Context Protocol.
 
 import json
 import os
-import sys
 from pathlib import Path
 
 from loguru import logger
@@ -26,8 +25,8 @@ def setup_logging(enable_logging: bool = False) -> None:
     By default, logging is disabled to prevent token waste in LLM context.
     Can be enabled via environment variable MCP_ENABLE_LOGGING=1 for debugging.
 
-    When enabled, uses plain text format without ANSI colors or box drawing characters
-    to avoid interfering with JSONRPC protocol on stdout.
+    When enabled, logs are written to a file to avoid polluting STDIO transport.
+    The log file path can be configured via MCP_LOG_FILE environment variable.
 
     Args:
         enable_logging: Whether to enable logging output. Defaults to False.
@@ -44,11 +43,26 @@ def setup_logging(enable_logging: bool = False) -> None:
     should_enable = enable_logging or env_enable
 
     if should_enable:
+        # Get log file path from environment or use default
+        log_file = os.environ.get("MCP_LOG_FILE")
+        if not log_file:
+            # Use ~/.cache/code-graph-rag/mcp.log as default
+            cache_dir = Path.home() / ".cache" / "code-graph-rag"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            log_file = str(cache_dir / "mcp.log")
+
+        # Ensure log file directory exists
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Add file handler - logs go to file, not STDERR/STDOUT
         logger.add(
-            sys.stderr,
+            log_file,
             level="INFO",
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
             colorize=False,  # Disable ANSI color codes
+            rotation="10 MB",  # Rotate when file reaches 10MB
+            retention="7 days",  # Keep logs for 7 days
         )
     else:
         # Disable all logging by default for MCP mode
