@@ -20,19 +20,39 @@ from codebase_rag.services.graph_service import MemgraphIngestor
 from codebase_rag.services.llm import CypherGenerator
 
 
-def setup_logging() -> None:
-    """Configure logging to stderr for MCP stdio transport.
+def setup_logging(enable_logging: bool = False) -> None:
+    """Configure logging for MCP stdio transport.
 
-    Uses plain text format without ANSI colors or box drawing characters
+    By default, logging is disabled to prevent token waste in LLM context.
+    Can be enabled via environment variable MCP_ENABLE_LOGGING=1 for debugging.
+
+    When enabled, uses plain text format without ANSI colors or box drawing characters
     to avoid interfering with JSONRPC protocol on stdout.
+
+    Args:
+        enable_logging: Whether to enable logging output. Defaults to False.
+                       Can also be controlled via MCP_ENABLE_LOGGING environment variable.
     """
     logger.remove()  # Remove default handler
-    logger.add(
-        sys.stderr,
-        level="INFO",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
-        colorize=False,  # Disable ANSI color codes
+
+    # Check environment variable to override enable_logging parameter
+    env_enable = os.environ.get("MCP_ENABLE_LOGGING", "").lower() in (
+        "1",
+        "true",
+        "yes",
     )
+    should_enable = enable_logging or env_enable
+
+    if should_enable:
+        logger.add(
+            sys.stderr,
+            level="INFO",
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+            colorize=False,  # Disable ANSI color codes
+        )
+    else:
+        # Disable all logging by default for MCP mode
+        logger.disable("codebase_rag")
 
 
 def get_project_root() -> Path:
@@ -150,34 +170,45 @@ def create_server() -> tuple[Server, MemgraphIngestor]:
 
         Tool handlers are dynamically resolved from the MCPToolsRegistry,
         ensuring consistency with tool definitions.
+
+        Logging is suppressed during tool execution to prevent token waste in LLM context.
         """
-        logger.info(f"[GraphCode MCP] Calling tool: {name}")
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
 
         try:
             # Resolve handler from registry
             handler_info = tools.get_tool_handler(name)
             if not handler_info:
-                error_msg = f"Unknown tool: {name}"
-                logger.error(f"[GraphCode MCP] {error_msg}")
+                error_msg = "Unknown tool"
                 return [TextContent(type="text", text=f"Error: {error_msg}")]
 
             handler, returns_json = handler_info
 
-            # Call handler with unpacked arguments
-            result = await handler(**arguments)
+            # Suppress all logging output during tool execution
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                logger.disable("codebase_rag")
+                try:
+                    # Call handler with unpacked arguments
+                    result = await handler(**arguments)
 
-            # Format result based on output type
-            if returns_json:
-                result_text = json.dumps(result, indent=2)
-            else:
-                result_text = str(result)
+                    # Format result based on output type
+                    if returns_json:
+                        result_text = json.dumps(result, indent=2)
+                    else:
+                        result_text = str(result)
 
-            return [TextContent(type="text", text=result_text)]
+                    return [TextContent(type="text", text=result_text)]
+                finally:
+                    logger.enable("codebase_rag")
 
-        except Exception as e:
-            error_msg = f"Error executing tool '{name}': {str(e)}"
-            logger.error(f"[GraphCode MCP] {error_msg}", exc_info=True)
-            return [TextContent(type="text", text=f"Error: {error_msg}")]
+        except Exception:
+            # Fail silently without logging or printing error details
+            return [
+                TextContent(
+                    type="text", text="Error: There was an error executing the tool"
+                )
+            ]
 
     return server, ingestor
 
